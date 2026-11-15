@@ -1,6 +1,15 @@
 <!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>MEP Daily Report · MGC</title>
+<meta name="description" content="MGC MEP daily manpower and progress report">
+<meta name="theme-color" content="#0f2a44">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="MEP Report">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
+<link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <style>
 :root{--ink:#0f172a;--mut:#64748b;--line:#e2e8f0;--bg:#f1f5f9;--navy:#2a3a9a;--navy2:#222f80;--ok:#059669;--bad:#b91c1c}
 *{box-sizing:border-box}
@@ -257,8 +266,11 @@ tr.gt td{background:#e2e8f0;font-weight:800;text-align:right;padding:8px 10px}
 <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
 <script>
 /* ============ App version and change log (bump APP_VERSION and add an entry on every change) ============ */
-const APP_VERSION = '1.48';
+const APP_VERSION = '1.49';
 const CHANGELOG = [
+  {v: '1.49', d: '2026-11-16', notes: [
+    'The app is now an installable web app: it has a home-screen icon and logo, opens full screen without the browser bar, and keeps working offline once opened. Updates are picked up automatically when you are online.',
+  ]},
   {v: '1.48', d: '2026-11-15', notes: [
     'PDF print: the Subcontractor section no longer has a separate "TOTAL (subcontractor) MANPOWER" row after each subcontractor. The grand total is unchanged.',
   ]},
@@ -2476,4 +2488,5 @@ async function restoreAll(file){
 /* ============ Start ============ */
 render();
 </script>
+<script>if('serviceWorker' in navigator){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}</script>
 </body></html>
