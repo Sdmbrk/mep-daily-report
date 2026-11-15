@@ -257,8 +257,12 @@ tr.gt td{background:#e2e8f0;font-weight:800;text-align:right;padding:8px 10px}
 <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
 <script>
 /* ============ App version and change log (bump APP_VERSION and add an entry on every change) ============ */
-const APP_VERSION = '1.46';
+const APP_VERSION = '1.47';
 const CHANGELOG = [
+  {v: '1.47', d: '2026-11-15', notes: [
+    'Daily Manpower Report: a new "Import .md report" button reads a foreman\'s Markdown report (plumbing, HVAC, electrical and sub contractors) into the project and date named in the file.',
+    'The import fills TH, block, % done, MGC labour and remarks. Labour supplier counts go to one "Imported labour supplier" line per discipline, because the file does not name the supplier. Blank cells in the file leave existing values alone. Margin notes have no field in the app, so they are shown in the import message only.',
+  ]},
   {v: '1.46', d: '2026-11-14', notes: [
     'MEP IPT Progress: the Projects card inside the section is removed. The header shows the selected project name.',
     'Each project has its own IPT data. The first project keeps the data entered before this version.',
@@ -1406,7 +1410,7 @@ function renderProject(){
     <div class="daybar">
       <label class="lbl">Report date<input type="date" class="inp" id="rDate" value="${ui.date}"></label>
       <label class="lbl">Working hours<input class="inp" id="rHours" value="${esc(d.hours || '')}" placeholder="e.g. 10 h" style="width:120px"></label>
-      <div class="exp"><button class="btn" data-psec="progress">Progress</button><button class="btn p" data-pv="pdf">Download PDF</button><button class="btn" data-pv="xlsx">Download Excel</button></div>
+      <div class="exp"><button class="btn" data-pv="import-md" title="Import a foreman's Markdown report">Import .md report</button><input type="file" id="mdImport" accept=".md,text/markdown,text/plain" hidden><button class="btn" data-psec="progress">Progress</button><button class="btn p" data-pv="pdf">Download PDF</button><button class="btn" data-pv="xlsx">Download Excel</button></div>
     </div>
     <div class="wd-tabs">${tabs}</div>
     <div id="rBody"></div>`;
@@ -2069,12 +2073,202 @@ $('#v-projects').addEventListener('change', async e => {
 });
 
 // Project daily report
+/* ============ Import a foreman's Markdown manpower report (v1.47) ============ */
+function mdClean(s){ return String(s == null ? '' : s).replace(/[`*]/g, '').replace(/\s+/g, ' ').trim(); }
+function mdBlank(s){ const c = mdClean(s); return !c || c === '-' || /^\(blank\)$/i.test(c) || /^\(faint/i.test(c); }
+function mdCells(line){ let s = line.trim(); if (s.startsWith('|')) s = s.slice(1); if (s.endsWith('|')) s = s.slice(0, -1); return s.split('|').map(c => c.trim()); }
+function mdActName(s){ return mdClean(s).replace(/\(.*?\)/g, '').replace(/\s+/g, ' ').trim().toUpperCase(); }
+function mdNum(s){ if (mdBlank(s)) return null; const m = mdClean(s).match(/^(\d+(?:\.\d+)?)/); return m ? +m[1] : null; }
+function mdDate(s){ const m = mdClean(s).match(/(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{2,4})/); if (!m) return null; let y = +m[3]; if (y < 100) y += 2000; return y + '-' + String(m[2]).padStart(2, '0') + '-' + String(m[1]).padStart(2, '0'); }
+function mdFloor(s){ const m = mdClean(s).match(/\b(GF|1F|2F)\b/i); return m ? m[1].toUpperCase() : ''; }
+
+// Reads a foreman's TH text such as "TH6-B1", "17 B4", "01" or "TH05B2". Ranges and unknown TH numbers are kept as a note only.
+function mdLocate(p, text){
+  const raw = mdClean(text);
+  if (mdBlank(raw)) return {th: '', block: '', note: ''};
+  const note = 'Foreman TH: ' + raw;
+  const c = raw.replace(/\(.*?\)/g, '').trim();
+  if (!c) return {th: '', block: '', note};
+  if (/^(?:TH\s*-?\s*)?\d+\s*-\s*\d+\b/i.test(c)) return {th: '', block: '', note};
+  const m = c.match(/^(?:TH\s*-?\s*)?0*(\d{1,2})(?!\d)/i);
+  if (!m) return {th: '', block: '', note};
+  const t = (p.ths || []).find(x => { const n = String(x.th).match(/(\d+)$/); return n && +n[1] === +m[1]; });
+  if (!t) return {th: '', block: '', note};
+  const bm = c.match(/B\s*(\d)/i);
+  const want = bm ? 'B' + bm[1] : '';
+  if (!want) return {th: t.th, block: '', note: ''};
+  if ((t.blocks || []).some(b => String(b.name).toUpperCase() === want)) return {th: t.th, block: want, note: ''};
+  return {th: t.th, block: '', note};
+}
+
+// Finds the activity in the database. Slab works exist per floor, so the floor and main activity pick one.
+function mdFindSub(k, mainName, actName, floor){
+  const want = mdActName(actName);
+  const cands = [];
+  (S.act[k] || []).forEach(m => m.subs.forEach(s => { if (mdActName(s.name) === want) cands.push({m, s}); }));
+  if (cands.length <= 1) return cands[0] || null;
+  const mw = mdActName(mainName);
+  let c = cands.filter(x => x.m.name.toUpperCase() === mw);
+  if (c.length === 1) return c[0];
+  c = cands.filter(x => mw && x.m.name.toUpperCase().includes(mw));
+  if (floor) { const f = c.filter(x => x.m.name.toUpperCase().startsWith(floor)); if (f.length) return f[0]; }
+  if (c.length === 1) return c[0];
+  return Object.assign({ambiguous: true}, c[0] || cands[0]);
+}
+
+// Chooses the report line for an activity: the same TH and block, else an empty line, else a new line for that activity.
+function pickRow(d, k, cand, loc){
+  const rows = d[k].rows.filter(r => r.sid === cand.s.id);
+  if (loc.th) { const same = rows.find(r => r.th === loc.th && (r.block || '') === (loc.block || '')); if (same) return same; }
+  const empty = rows.find(r => !r.th && !r.block && r.pct == null && !r.rem && LAB.every(x => !((r.lab || {})[x])));
+  if (empty) return empty;
+  const nr = newRow(cand.m.id, cand.s.id, cand.m.name, cand.s.name);
+  d[k].rows.splice(d[k].rows.indexOf(rows[rows.length - 1]) + 1, 0, nr);
+  return nr;
+}
+
+// Reads the Markdown into tables, the project name, the date and the per-discipline details. Nothing is saved here.
+function parseManpowerMd(text){
+  const out = {project: '', date: null, tables: [], meta: {}};
+  let sec = null, header = null;
+  for (const raw of String(text).split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line) { header = null; continue; }
+    const h = line.match(/^##\s+(?:\d+\.\s*)?(.+)$/);
+    if (h) {
+      const t = h[1].toUpperCase();
+      sec = t.includes('PLUMBING') ? 'PL' : t.includes('HVAC') ? 'HV' : t.includes('ELECTRICAL') ? 'EL' : t.includes('SUB CONTRACTOR') ? 'SUB' : null;
+      header = null; continue;
+    }
+    if (line.startsWith('|')) {
+      const cells = mdCells(line);
+      if (cells.every(c => /^:?-+:?$/.test(c))) continue;
+      if (!header) { header = cells.map(c => mdClean(c).toLowerCase()); continue; }
+      if (sec) out.tables.push({sec, header, cells});
+      continue;
+    }
+    const kv = line.match(/^\*?\s*\*\*([^*]+?):\*\*\s*(.*)$/);
+    if (kv) {
+      const key = kv[1].trim().toLowerCase(), val = kv[2].trim();
+      if (!sec && key === 'project' && !out.project) out.project = mdClean(val).toUpperCase();
+      else if (!sec && key === 'date' && !out.date) out.date = mdDate(val);
+      else if (sec) { out.meta[sec] = out.meta[sec] || {}; out.meta[sec][key] = val; }
+    }
+  }
+  return out;
+}
+
+// Writes the parsed report into the project and date it names (falls back to the open project and date).
+function applyManpowerImport(parsed){
+  const named = parsed.project, warnings = [];
+  let p = (S.projects || []).find(x => named && x.name.toUpperCase() === named);
+  if (!p) p = curProj();
+  if (named && p.name.toUpperCase() !== named) warnings.push('Project "' + named + '" is not in this app, so the report went into ' + p.name + '.');
+  const date = parsed.date || ui.date;
+  const d = dayOf(p.id, date);
+  const res = {p, date, warnings, lines: 0, subs: 0, notes: []};
+  const supSum = {EL: {st: 0, sh: 0}, PL: {st: 0, sh: 0}, HV: {st: 0, sh: 0}};
+
+  parsed.tables.forEach(tb => {
+    const {sec, header, cells} = tb;
+    const at = pred => header.findIndex(pred);
+    if (sec === 'SUB') {
+      const cDisc = at(h => h.startsWith('discipline')), cSub = at(h => h.startsWith('sub contractor'));
+      const cAct = at(h => h === 'activity'), cTh = at(h => h.startsWith('th no')), cQty = at(h => h.startsWith('completed'));
+      const cMan = at(h => h === 'manpower'), cRem = at(h => h === 'remarks');
+      const discRaw = mdClean(cells[cDisc]).toUpperCase();
+      const dk = discRaw.includes('HVAC') ? 'HV' : discRaw.includes('ELECTRICAL') ? 'EL' : discRaw.includes('PLUMBING') ? 'PL' : discRaw === 'LPG' ? 'LPG' : '';
+      const subName = mdClean(cells[cSub]).toUpperCase();
+      if (!dk || !subName) return;
+      const act = mdBlank(cells[cAct]) ? '' : mdClean(cells[cAct]);
+      const loc = mdLocate(p, cells[cTh]);
+      const qtyText = mdBlank(cells[cQty]) ? '' : mdClean(cells[cQty]);
+      const qty = /^\d+$/.test(qtyText) ? +qtyText : null;
+      const man = mdNum(cells[cMan]);
+      const remark = mdBlank(cells[cRem]) ? '' : mdClean(cells[cRem]);
+      if (!act && !loc.th && qty == null && man == null && !remark) return;
+      const sub = S.subs.find(x => x.name.toUpperCase() === subName);
+      if (!sub) { warnings.push('Sub contractor "' + subName + '" is not in the Sub contractor database.'); return; }
+      const rem = [remark, qtyText && qty == null ? 'Completed: ' + qtyText : '', loc.note].filter(Boolean).join('; ');
+      let e = d.subs.find(x => x.disc === dk && x.sid === sub.id && x.th === loc.th && x.act === act);
+      if (!e) { e = {id: 'x' + uid(), disc: dk, sid: sub.id, sname: sub.name, act, th: loc.th, block: '', qty: null, man: null, rem: ''}; d.subs.push(e); }
+      e.block = loc.block; e.qty = qty; e.man = man; e.rem = rem;
+      res.subs++;
+      return;
+    }
+    if (!['PL', 'HV', 'EL'].includes(sec)) return;
+    const cMain = at(h => h === 'main activity'), cAct = at(h => h === 'activity');
+    const cTh = at(h => h.startsWith('th no')), cPct = at(h => h.startsWith('% done')), cRem = at(h => h === 'remarks');
+    const labCols = {};
+    header.forEach((h, i) => {
+      if (h.startsWith('mgc')) labCols[i] = h.includes('charge') ? 'mch' : h.includes('asst') ? 'ma' : 'mt';
+      else if (h.startsWith('labour supplier')) labCols[i] = h.includes('helper') ? 'sh' : 'st';
+    });
+    if (cAct < 0 || mdBlank(cells[cAct])) return;
+    const actRaw = mdClean(cells[cAct]), thRaw = cTh >= 0 ? cells[cTh] : '';
+    const loc = mdLocate(p, thRaw);
+    const cand = mdFindSub(sec, cMain >= 0 ? mdClean(cells[cMain]) : '', actRaw, mdFloor(thRaw));
+    if (!cand) { warnings.push(sec + ': "' + mdActName(actRaw) + '" is not in the activity database.'); return; }
+    if (cand.ambiguous) warnings.push(sec + ': "' + mdActName(actRaw) + '" fits more than one floor; used ' + cand.m.name + '.');
+    const pct = cPct >= 0 ? mdNum(cells[cPct]) : null;
+    const remark = cRem >= 0 && !mdBlank(cells[cRem]) ? mdClean(cells[cRem]) : '';
+    const lab = {};
+    Object.entries(labCols).forEach(([i, key]) => {
+      const v = mdNum(cells[i]);
+      if (v == null) return;
+      if (key === 'st' || key === 'sh') supSum[sec][key] += v; else lab[key] = v;
+    });
+    if (!loc.th && pct == null && !Object.keys(lab).length && !remark && !loc.note) return;
+    const r = pickRow(d, sec, cand, loc);
+    if (loc.th) { r.th = loc.th; r.block = loc.block; }
+    if (pct != null) r.pct = Math.max(0, Math.min(100, pct));
+    r.lab = r.lab || {};
+    LAB_MGC.forEach(x => { if (lab[x] != null) r.lab[x] = lab[x]; });
+    const parts = [remark, loc.note].filter(Boolean);
+    if (parts.length) r.rem = parts.join('; ');
+    if (r.th && r.pct != null) progStore(S.prog, p.id, sec, r.th, r.block || '', r.sid, r.pct);
+    res.lines++;
+  });
+
+  ['EL', 'PL', 'HV'].forEach(k => {
+    const m = parsed.meta[k] || {};
+    const by = m['prepared by'] ? mdClean(m['prepared by']) : '';
+    if (by && !mdBlank(by)) d[k].by = by;
+    const hours = m['working hours'] ? mdClean(m['working hours']) : '';
+    if (hours && !mdBlank(hours)) d.hours = hours;
+    ['top margin note', 'bottom margin note'].forEach(key => { if (m[key] && !mdBlank(m[key])) res.notes.push(k + ': ' + mdClean(m[key])); });
+    if (supSum[k].st || supSum[k].sh) {
+      d[k].lsup = d[k].lsup || [];
+      let e = d[k].lsup.find(x => x.name === 'Imported labour supplier');
+      if (!e) { e = {id: 'ls' + uid(), sid: null, name: 'Imported labour supplier', lab: {}, rem: ''}; d[k].lsup.push(e); }
+      e.lab = {st: supSum[k].st, sh: supSum[k].sh};
+    }
+  });
+  return res;
+}
+
+async function importMd(input){
+  const f = input.files && input.files[0];
+  input.value = '';
+  if (!f) return;
+  const parsed = parseManpowerMd(await f.text());
+  if (!parsed.tables.length) { toast('No report tables were found in that file.', true); return; }
+  const res = applyManpowerImport(parsed);
+  ui.pid = res.p.id; ui.date = res.date;
+  save(); renderProject();
+  let msg = 'Imported ' + res.lines + ' activity lines and ' + res.subs + ' sub contractor lines into ' + res.p.name + ' for ' + res.date + '.';
+  if (res.notes.length) msg += ' Margin notes (not stored): ' + res.notes.join(' | ');
+  if (res.warnings.length) msg += ' To check: ' + res.warnings.slice(0, 4).join(' ');
+  toast(msg, res.warnings.length > 0);
+}
+
 $('#v-project').addEventListener('click', e => {
   const b = e.target.closest('button'); if (!b) return;
   if (b.dataset.tab) { ui.disc = b.dataset.tab; renderProject(); return; }
   if (b.dataset.ptab) { ui.disc = b.dataset.ptab; renderProject(); return; }
   if (b.dataset.pgscroll) { const w = b.closest('.pg-outer').querySelector('.pg-wrap'); w.scrollBy({left: 300 * +b.dataset.pgscroll, behavior: 'smooth'}); return; }
   if (b.dataset.pv === 'back') { go('projects'); return; }
+  if (b.dataset.pv === 'import-md') { document.getElementById('mdImport').click(); return; }
   if (b.dataset.psec) { ui.psec = b.dataset.psec; renderProject(); window.scrollTo(0, 0); return; }
   if (b.dataset.pv === 'hub') { ui.psec = 'hub'; renderProject(); window.scrollTo(0, 0); return; }
   if (b.dataset.pm === 'backup') { pmBackup(); return; }
@@ -2101,6 +2295,7 @@ $('#v-project').addEventListener('click', e => {
 $('#v-project').addEventListener('change', e => {
   const t = e.target, p = curProj(), d = curDay();
   if (t.id === 'pmFile') { pmRestore(t); return; }
+  if (t.id === 'mdImport') { importMd(t); return; }
   if (t.id === 'rDate') { ui.date = t.value || todayIso(); renderProject(); return; }
   if (t.dataset.psid) {
     const v = t.value === '' ? null : Math.max(0, Math.min(100, +t.value || 0));
