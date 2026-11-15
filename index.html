@@ -257,8 +257,11 @@ tr.gt td{background:#e2e8f0;font-weight:800;text-align:right;padding:8px 10px}
 <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
 <script>
 /* ============ App version and change log (bump APP_VERSION and add an entry on every change) ============ */
-const APP_VERSION = '1.47';
+const APP_VERSION = '1.48';
 const CHANGELOG = [
+  {v: '1.48', d: '2026-11-15', notes: [
+    'PDF print: the Subcontractor section no longer has a separate "TOTAL (subcontractor) MANPOWER" row after each subcontractor. The grand total is unchanged.',
+  ]},
   {v: '1.47', d: '2026-11-15', notes: [
     'Daily Manpower Report: a new "Import .md report" button reads a foreman\'s Markdown report (plumbing, HVAC, electrical and sub contractors) into the project and date named in the file.',
     'The import fills TH, block, % done, MGC labour and remarks. Labour supplier counts go to one "Imported labour supplier" line per discipline, because the file does not name the supplier. Blank cells in the file leave existing values alone. Margin notes have no field in the app, so they are shown in the import message only.',
@@ -1659,7 +1662,6 @@ function exportPdf(){
     const lines = [];
     subs.forEach(s => {
       s.rows.forEach(x => lines.push([s.name, x.act || '', x.th || '', x.th ? (x.block || 'Full TH') : '', fmtN(x.qty), fmtN(x.man), x.rem || '']));
-      lines.push([{content: 'TOTAL ' + s.name + ' MANPOWER', colSpan: 4, styles: {halign: 'right', fontStyle: 'bold'}}, {content: s.qty || '', styles: {fontStyle: 'bold'}}, {content: s.man || '', styles: {fontStyle: 'bold'}}, '']);
       gq += s.qty; gm += s.man;
     });
     lines.forEach((ln, i) => {
