@@ -257,8 +257,11 @@ tr.gt td{background:#e2e8f0;font-weight:800;text-align:right;padding:8px 10px}
 <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
 <script>
 /* ============ App version and change log (bump APP_VERSION and add an entry on every change) ============ */
-const APP_VERSION = '1.49';
+const APP_VERSION = '1.50';
 const CHANGELOG = [
+  {v: '1.50', d: '2026-11-16', notes: [
+    'Work code box in the Activity database is now fixed in width, so it is visible next to each main activity name.',
+  ]},
   {v: '1.49', d: '2026-11-16', notes: [
     'Main activities no longer show the automatic number (such as 13.01 1). Only the work code you enter is shown, in the Activity database, the daily report and the progress table. Sub activity numbers are unchanged.',
   ]},
@@ -1845,7 +1848,7 @@ function renderActivity(){
   const cards = mains.map(m => {
     const sum = m.subs.reduce((a, s) => a + (+s.w || 0), 0), ok = Math.abs(sum - 100) < 0.01;
     return `<section class="act-card">
-      <div class="act-h"><input class="cell" data-am="${m.id}" value="${esc(m.name)}" title="Main activity"><input class="cell" data-amc="${m.id}" value="${esc(m.code || '')}" placeholder="Work code" title="Work code, shown in the PDF report" style="width:110px"><span class="badge ${ok ? 'ok' : 'bad'}" data-msum="${m.id}">${+sum.toFixed(2)}% ${ok ? '✓' : '· should total 100%'}</span><button class="x" data-aact="delmain" data-mid="${m.id}" title="Remove main activity">×</button></div>
+      <div class="act-h"><input class="cell" data-am="${m.id}" value="${esc(m.name)}" title="Main activity"><input class="cell" data-amc="${m.id}" value="${esc(m.code || '')}" placeholder="Work code" title="Work code, shown in the PDF report" style="flex:0 0 130px;font-weight:700;text-align:center"><span class="badge ${ok ? 'ok' : 'bad'}" data-msum="${m.id}">${+sum.toFixed(2)}% ${ok ? '✓' : '· should total 100%'}</span><button class="x" data-aact="delmain" data-mid="${m.id}" title="Remove main activity">×</button></div>
       <table><thead><tr><th class="l">Sub activity</th><th class="n" style="width:120px">Weightage %</th><th></th></tr></thead>
       <tbody>${m.subs.map(s => `<tr><td><span class="no">${actNo(k, m.id, s.id)}</span><input class="cell" data-as="${s.id}" data-af="name" value="${esc(s.name)}"></td>
         <td class="n"><input class="cell num" type="number" step="0.01" min="0" max="100" data-as="${s.id}" data-af="w" data-mid="${m.id}" value="${+s.w}"></td>
