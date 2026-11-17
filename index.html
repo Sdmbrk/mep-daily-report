@@ -259,8 +259,12 @@ tr.gt td{background:#e2e8f0;font-weight:800;text-align:right;padding:8px 10px}
 <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
 <script>
 /* ============ App version and change log (bump APP_VERSION and add an entry on every change) ============ */
-const APP_VERSION = '1.54';
+const APP_VERSION = '1.55';
 const CHANGELOG = [
+  {v: '1.55', d: '2026-11-17', notes: [
+    'Save report: a Save report button in the daily report bar saves the day and confirms it. Changes are also saved as you make them.',
+    'Done to date: the daily report shows each sub activity\'s % done from the Progress section, just before % sub activity done. The PDF prints it too.',
+  ]},
   {v: '1.54', d: '2026-11-17', notes: [
     'Sub activities have no numbers: the numbers 1.1, 2.1 and so on are removed from the report, the progress table and the Activity database.',
     'Work codes are saved as you type, so a main activity keeps its code even if the box is left without a change event.',
@@ -1433,7 +1437,7 @@ function renderProject(){
     <div class="daybar">
       <label class="lbl">Report date<input type="date" class="inp" id="rDate" value="${ui.date}"></label>
       <label class="lbl">Working hours<input class="inp" id="rHours" value="${esc(d.hours || '')}" placeholder="e.g. 10 h" style="width:120px"></label>
-      <div class="exp"><button class="btn" data-pv="import-md" title="Import a foreman's Markdown manpower report">Import .md report</button><input type="file" id="mdImport" accept=".md,text/markdown,text/plain" hidden><button class="btn" data-psec="progress">Progress</button><button class="btn p" data-pv="pdf">Download PDF</button><button class="btn" data-pv="blank-pdf" title="Blank PDF to fill in by hand">Blank PDF template</button><button class="btn" data-pv="xlsx">Download Excel</button></div>
+      <div class="exp"><button class="btn p" data-pv="save-report" title="Save this day's report">Save report</button><button class="btn" data-pv="import-md" title="Import a foreman's Markdown manpower report">Import .md report</button><input type="file" id="mdImport" accept=".md,text/markdown,text/plain" hidden><button class="btn" data-psec="progress">Progress</button><button class="btn p" data-pv="pdf">Download PDF</button><button class="btn" data-pv="blank-pdf" title="Blank PDF to fill in by hand">Blank PDF template</button><button class="btn" data-pv="xlsx">Download Excel</button></div>
     </div>
     <div class="wd-tabs">${tabs}</div>
     <div id="rBody"></div>`;
@@ -1455,7 +1459,7 @@ function discHtml(p, d, k){
   const D = DISC_BY[k], groups = discGroups(d, k), rows = d[k].rows;
   const lab = labSum(d, k);
   const body = groups.map(g => g.rows.map((v, i) => {
-    const r = v.r, first = i === 0;
+    const r = v.r, first = i === 0, dn = r.th ? progGet(p.id, k, r.th, r.block || '', r.sid) : undefined;
     const blkDis = (p.ths.find(t => t.th === r.th) || {blocks: []}).blocks.length ? '' : 'disabled';
     const firstOfSub = i === 0 || g.rows[i - 1].r.sid !== r.sid;
     return `<tr data-rid="${r.id}" class="${first ? 'gfirst' : ''}${v.orphan ? ' orph' : ''}${r.th && !isNum(r.pct) ? ' bad-row' : ''}">
@@ -1464,6 +1468,7 @@ function discHtml(p, d, k){
       <td class="n">${wTxt(v.w)}</td>
       <td><select class="inp" data-f="th">${thOptsHtml(p, r.th)}</select></td>
       <td><select class="inp" data-f="block" ${blkDis}>${blockOptsHtml(p, r.th, r.block)}</select></td>
+      <td class="n done-td" title="Done to date, from the Progress section">${dn != null ? dn + '%' : ''}</td>
       <td class="n"><input class="inp num" type="number" min="0" max="100" step="1" data-f="pct" value="${isNum(r.pct) ? r.pct : ''}"></td>
       <td class="n mainpct">${v.showMain ? `<b data-mp="${g.mid}|${v.scope}">${v.mainPct != null ? pctTxt(v.mainPct) : ''}</b>` : ''}</td>
       ${LAB_MGC.map(x => `<td class="n"><input class="inp num" type="number" min="0" data-f="${x}" value="${(r.lab || {})[x] || ''}"></td>`).join('')}
@@ -1480,11 +1485,11 @@ function discHtml(p, d, k){
     </div>
     <div class="tbl"><table>
       <thead>
-        <tr><th rowspan="2" class="l">Main activity</th><th rowspan="2" class="l">Sub activity</th><th rowspan="2" class="n">Weight %</th><th rowspan="2">TH</th><th rowspan="2">Block</th><th rowspan="2" class="n">% sub done</th><th rowspan="2" class="n">% main done</th>${headGroup('MGC', 3)}${sups.map(s => headGroup(`${esc(s.name)} <button class="x" data-lsup="del" data-lsid="${s.id}" title="Remove this labour supplier from the day's report">×</button>`, 2)).join('')}<th rowspan="2" class="l">Remarks</th><th rowspan="2"></th></tr>
+        <tr><th rowspan="2" class="l">Main activity</th><th rowspan="2" class="l">Sub activity</th><th rowspan="2" class="n">Weight %</th><th rowspan="2">TH</th><th rowspan="2">Block</th><th rowspan="2" class="n" title="Done to date, from the Progress section">Done to date %</th><th rowspan="2" class="n">% sub done</th><th rowspan="2" class="n">% main done</th>${headGroup('MGC', 3)}${sups.map(s => headGroup(`${esc(s.name)} <button class="x" data-lsup="del" data-lsid="${s.id}" title="Remove this labour supplier from the day's report">×</button>`, 2)).join('')}<th rowspan="2" class="l">Remarks</th><th rowspan="2"></th></tr>
         <tr>${LAB_MGC.map(x => `<th class="n">${labelShort(D, x)}</th>`).join('')}${sups.map(() => `<th class="n">${LSUP_HEAD.st}</th><th class="n">${LSUP_HEAD.sh}</th>`).join('')}</tr>
       </thead>
       <tbody>${body || '<tr><td colspan="${12 + 2 * sups.length}" class="empty">No activities in the database for this discipline.</td></tr>'}</tbody>
-      <tfoot><tr><td colspan="7" class="l">TOTAL LABOUR</td>${LAB_MGC.map(x => `<td class="n" data-tot="${x}">${lab[x] || ''}</td>`).join('')}${sups.map(s => LAB_SUP.map(x => `<td class="n" data-supt="${s.id}|${x}">${(stot[s.id] || {})[x] || ''}</td>`).join('')).join('')}<td colspan="2"></td></tr></tfoot>
+      <tfoot><tr><td colspan="8" class="l">TOTAL LABOUR</td>${LAB_MGC.map(x => `<td class="n" data-tot="${x}">${lab[x] || ''}</td>`).join('')}${sups.map(s => LAB_SUP.map(x => `<td class="n" data-supt="${s.id}|${x}">${(stot[s.id] || {})[x] || ''}</td>`).join('')).join('')}<td colspan="2"></td></tr></tfoot>
     </table></div>
     ${lsupHtml(d, k)}
   </section>`;
@@ -1595,11 +1600,12 @@ function reportMeta(p, d, D){
     line: D ? `${D.n.toUpperCase()} — MGC & LABOUR SUPPLIERS` : 'MEP SUB CONTRACTORS DAILY WORK DETAILS',
     date: fmtIso(ui.date), day: fmtLong(ui.date), hours: d.hours || '', by: (D ? d[D.k].by : '') || '', project: p.name.toUpperCase()};
 }
-function discLines(d, k){
+function discLines(d, k, pid){
   return discGroups(d, k).map(g => ({name: g.name, code: g.code, rows: g.rows.map(v => ({
     sub: v.subName, w: v.w, th: v.r.th || '', block: v.r.th ? (v.r.block || 'Full TH') : '',
     pct: isNum(v.r.pct) ? +v.r.pct : null, mainPct: v.mainPct,
-    lab: LAB.map(x => +(v.r.lab || {})[x] || 0), sup: v.r.sup || {}, rem: v.r.rem || ''}))}));
+    lab: LAB.map(x => +(v.r.lab || {})[x] || 0), sup: v.r.sup || {}, rem: v.r.rem || '',
+    done: v.r.th ? progGet(pid, k, v.r.th, v.r.block || '', v.r.sid) : undefined}))}));
 }
 // A line has values if it has a TH, a % done, labour or supplier counts, or a remark. Empty lines are left out of the PDF.
 function lineHasValue(r){
@@ -1655,7 +1661,7 @@ function blankPdf(){
     (S.act[D.k] || []).forEach(m => {
       const lines = [];
       (m.subs.length ? m.subs : [{name: '', w: ''}]).forEach(s => {
-        for (let x = 0; x < 3; x++) lines.push([x === 0 ? s.name : '', x === 0 ? wTxt(s.w) : '', '', '', '', '', ...empties(labCount), '']);
+        for (let x = 0; x < 3; x++) lines.push([x === 0 ? s.name : '', x === 0 ? wTxt(s.w) : '', '', '', '', '', '', ...empties(labCount), '']);
       });
       lines.forEach((ln, i2) => {
         const row = i2 === 0 ? [{content: (m.code ? m.code + '\n' : '') + m.name, rowSpan: lines.length, styles: {valign: 'middle', fontStyle: 'bold', fillColor: D.rt}}] : [];
@@ -1663,21 +1669,21 @@ function blankPdf(){
       });
     });
     const cs = {0: {cellWidth: 26, halign: 'left'}, 1: {cellWidth: 36, halign: 'left'}, 2: {cellWidth: 12}, 3: {cellWidth: 12}, 4: {cellWidth: 12},
-      5: {cellWidth: 13}, 6: {cellWidth: 13}, 7: {cellWidth: 17}, 8: {cellWidth: 17}, 9: {cellWidth: 19}};
+      5: {cellWidth: 13}, 6: {cellWidth: 13}, 7: {cellWidth: 13}, 8: {cellWidth: 17}, 9: {cellWidth: 17}, 10: {cellWidth: 19}};
     const supW = Math.min(19, Math.max(11, 76 / (2 * Math.max(1, sups.length))));
-    sups.forEach((_, k) => { cs[10 + 2 * k] = {cellWidth: supW}; cs[11 + 2 * k] = {cellWidth: supW}; });
-    cs[10 + 2 * sups.length] = {halign: 'left'};
+    sups.forEach((_, k) => { cs[11 + 2 * k] = {cellWidth: supW}; cs[12 + 2 * k] = {cellWidth: supW}; });
+    cs[11 + 2 * sups.length] = {halign: 'left'};
     doc.autoTable({
       startY: 33, margin: {left: 10, right: 10},
       head: [[
         {content: 'MAIN ACTIVITY', rowSpan: 2}, {content: 'SUB ACTIVITY', rowSpan: 2}, {content: 'WEIGHT %', rowSpan: 2},
-        {content: 'TH NO.', rowSpan: 2}, {content: 'BLOCK', rowSpan: 2}, {content: '% SUB ACTIVITY DONE', rowSpan: 2},
+        {content: 'TH NO.', rowSpan: 2}, {content: 'BLOCK', rowSpan: 2}, {content: 'DONE TO DATE %', rowSpan: 2}, {content: '% SUB ACTIVITY DONE', rowSpan: 2},
         {content: '% MAIN ACTIVITY DONE', rowSpan: 2}, {content: 'MGC', colSpan: 3},
         ...sups.map(x => ({content: x.name, colSpan: 2})),
         {content: 'REMARKS', rowSpan: 2}],
         [...D.mgc.map(a => a[1]), ...sups.flatMap(() => [LSUP_HEAD.st, LSUP_HEAD.sh])]],
-      body: body.length ? body : [[{content: 'No activities in the database for this discipline', colSpan: 11 + 2 * sups.length}]],
-      foot: [[{content: 'TOTAL', colSpan: 7, styles: {halign: 'right'}}, ...empties(labCount), '']],
+      body: body.length ? body : [[{content: 'No activities in the database for this discipline', colSpan: 12 + 2 * sups.length}]],
+      foot: [[{content: 'TOTAL', colSpan: 8, styles: {halign: 'right'}}, ...empties(labCount), '']],
       styles: {fontSize: 7.2, cellPadding: 0.9, valign: 'middle', halign: 'center', lineColor: [203, 213, 225], lineWidth: 0.1, minCellHeight: 6.5},
       headStyles: {fillColor: D.rt, textColor: D.rd, fontStyle: 'bold', fontSize: 6.3, halign: 'center', cellPadding: 1.1},
       footStyles: {fillColor: [226, 232, 240], textColor: [15, 23, 42], fontStyle: 'bold'},
@@ -1713,11 +1719,11 @@ function exportPdf(){
   DISCS.forEach((D, i) => {
     if (i) doc.addPage('a4', 'landscape');
     pdfHead(doc, reportMeta(p, d, D), W);
-    const groups = discLines(d, D.k).map(g => ({name: g.name, code: g.code, rows: g.rows.filter(lineHasValue)})).filter(g => g.rows.length), body = [], sups = d[D.k].lsup || [];
+    const groups = discLines(d, D.k, p.id).map(g => ({name: g.name, code: g.code, rows: g.rows.filter(lineHasValue)})).filter(g => g.rows.length), body = [], sups = d[D.k].lsup || [];
     groups.forEach(g => g.rows.forEach((r, i2) => {
       const row = [];
       if (i2 === 0) row.push({content: (g.code ? g.code + '\n' : '') + g.name, rowSpan: g.rows.length, styles: {valign: 'middle', fontStyle: 'bold', fillColor: D.rt}});
-      row.push(r.sub, wTxt(r.w), r.th, r.block, r.pct != null ? r.pct + '%' : '', r.mainPct != null ? pctTxt(r.mainPct) : '',
+      row.push(r.sub, wTxt(r.w), r.th, r.block, r.done != null ? r.done + '%' : '', r.pct != null ? r.pct + '%' : '', r.mainPct != null ? pctTxt(r.mainPct) : '',
         ...r.lab.slice(0, LAB_MGC.length).map(fmtN), ...sups.flatMap(s => LAB_SUP.map(x => fmtN(((r.sup || {})[s.id] || {})[x]))), r.rem);
       body.push(row);
     }));
@@ -1725,20 +1731,20 @@ function exportPdf(){
     // Each labour supplier gets its own TECHNICIAN and HELPER columns after MGC; the page width is shared between them.
     const supW = Math.min(19, Math.max(11, 76 / (2 * Math.max(1, sups.length))));
     const cs = {0: {cellWidth: 26, halign: 'left'}, 1: {cellWidth: 36, halign: 'left'}, 2: {cellWidth: 12}, 3: {cellWidth: 12}, 4: {cellWidth: 12},
-      5: {cellWidth: 13}, 6: {cellWidth: 13}, 7: {cellWidth: 17}, 8: {cellWidth: 17}, 9: {cellWidth: 19}};
-    sups.forEach((_, i) => { cs[10 + 2 * i] = {cellWidth: supW}; cs[11 + 2 * i] = {cellWidth: supW}; });
-    cs[10 + 2 * sups.length] = {halign: 'left'};
+      5: {cellWidth: 13}, 6: {cellWidth: 13}, 7: {cellWidth: 13}, 8: {cellWidth: 17}, 9: {cellWidth: 17}, 10: {cellWidth: 19}};
+    sups.forEach((_, i) => { cs[11 + 2 * i] = {cellWidth: supW}; cs[12 + 2 * i] = {cellWidth: supW}; });
+    cs[11 + 2 * sups.length] = {halign: 'left'};
     doc.autoTable({
       startY: 33, margin: {left: 10, right: 10},
       head: [[
         {content: 'MAIN ACTIVITY', rowSpan: 2}, {content: 'SUB ACTIVITY', rowSpan: 2}, {content: 'WEIGHT %', rowSpan: 2},
-        {content: 'TH NO.', rowSpan: 2}, {content: 'BLOCK', rowSpan: 2}, {content: '% SUB ACTIVITY DONE', rowSpan: 2},
+        {content: 'TH NO.', rowSpan: 2}, {content: 'BLOCK', rowSpan: 2}, {content: 'DONE TO DATE %', rowSpan: 2}, {content: '% SUB ACTIVITY DONE', rowSpan: 2},
         {content: '% MAIN ACTIVITY DONE', rowSpan: 2}, {content: 'MGC', colSpan: 3},
         ...sups.map(x => ({content: x.name, colSpan: 2})),
         {content: 'REMARKS', rowSpan: 2}],
         [...D.mgc.map(a => a[1]), ...sups.flatMap(() => [LSUP_HEAD.st, LSUP_HEAD.sh])]],
-      body: body.length ? body : [[{content: 'No lines', colSpan: 11 + 2 * sups.length}]],
-      foot: [[{content: 'TOTAL', colSpan: 7, styles: {halign: 'right'}}, ...LAB_MGC.map(x => tot[x] || ''),
+      body: body.length ? body : [[{content: 'No lines', colSpan: 12 + 2 * sups.length}]],
+      foot: [[{content: 'TOTAL', colSpan: 8, styles: {halign: 'right'}}, ...LAB_MGC.map(x => tot[x] || ''),
         ...sups.flatMap(s => LAB_SUP.map(y => (stot[s.id] || {})[y] || '')), '']],
       styles: {fontSize: 7.2, cellPadding: 0.9, valign: 'middle', halign: 'center', lineColor: [203, 213, 225], lineWidth: 0.1},
       headStyles: {fillColor: D.rt, textColor: D.rd, fontStyle: 'bold', fontSize: 6.3, halign: 'center', cellPadding: 1.1},
@@ -2365,6 +2371,7 @@ $('#v-project').addEventListener('click', e => {
   if (b.dataset.pgscroll) { const w = b.closest('.pg-outer').querySelector('.pg-wrap'); w.scrollBy({left: 300 * +b.dataset.pgscroll, behavior: 'smooth'}); return; }
   if (b.dataset.pv === 'back') { go('projects'); return; }
   if (b.dataset.pv === 'blank-pdf') { blankPdf(); return; }
+  if (b.dataset.pv === 'save-report') { if (save()) toast('Daily report saved for ' + fmtIso(ui.date) + '.'); return; }
   if (b.dataset.pv === 'import-md') { document.getElementById('mdImport').click(); return; }
   if (b.dataset.psec) { ui.psec = b.dataset.psec; renderProject(); window.scrollTo(0, 0); return; }
   if (b.dataset.pv === 'hub') { ui.psec = 'hub'; renderProject(); window.scrollTo(0, 0); return; }
