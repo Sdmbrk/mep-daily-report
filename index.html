@@ -259,8 +259,11 @@ tr.gt td{background:#e2e8f0;font-weight:800;text-align:right;padding:8px 10px}
 <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
 <script>
 /* ============ App version and change log (bump APP_VERSION and add an entry on every change) ============ */
-const APP_VERSION = '1.52';
+const APP_VERSION = '1.53';
 const CHANGELOG = [
+  {v: '1.53', d: '2026-11-17', notes: [
+    'Work codes in the PDF: each main activity\'s work code now prints above its name in the daily report PDF. Before, only the on-screen table showed it.',
+  ]},
   {v: '1.52', d: '2026-11-16', notes: [
     'Work code on top: in the daily report and progress tables, each main activity shows its work code on its own line, with the activity name below it. The old numbering stays out of the main activity.',
   ]},
@@ -1589,7 +1592,7 @@ function reportMeta(p, d, D){
     date: fmtIso(ui.date), day: fmtLong(ui.date), hours: d.hours || '', by: (D ? d[D.k].by : '') || '', project: p.name.toUpperCase()};
 }
 function discLines(d, k){
-  return discGroups(d, k).map(g => ({name: g.name, rows: g.rows.map(v => ({
+  return discGroups(d, k).map(g => ({name: g.name, code: g.code, rows: g.rows.map(v => ({
     sub: v.subName, w: v.w, th: v.r.th || '', block: v.r.th ? (v.r.block || 'Full TH') : '',
     pct: isNum(v.r.pct) ? +v.r.pct : null, mainPct: v.mainPct,
     lab: LAB.map(x => +(v.r.lab || {})[x] || 0), sup: v.r.sup || {}, rem: v.r.rem || ''}))}));
@@ -1706,7 +1709,7 @@ function exportPdf(){
   DISCS.forEach((D, i) => {
     if (i) doc.addPage('a4', 'landscape');
     pdfHead(doc, reportMeta(p, d, D), W);
-    const groups = discLines(d, D.k).map(g => ({name: g.name, rows: g.rows.filter(lineHasValue)})).filter(g => g.rows.length), body = [], sups = d[D.k].lsup || [];
+    const groups = discLines(d, D.k).map(g => ({name: g.name, code: g.code, rows: g.rows.filter(lineHasValue)})).filter(g => g.rows.length), body = [], sups = d[D.k].lsup || [];
     groups.forEach(g => g.rows.forEach((r, i2) => {
       const row = [];
       if (i2 === 0) row.push({content: (g.code ? g.code + '\n' : '') + g.name, rowSpan: g.rows.length, styles: {valign: 'middle', fontStyle: 'bold', fillColor: D.rt}});
